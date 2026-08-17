@@ -26,6 +26,58 @@ def _sd(proceso):
     return STATIC_DATA["procesos"].get(proceso, {})
 
 
+# Per-mesa fallback shards (see generate_mesa_static.py). Used when ONPE's
+# Cloudflare blocks the server's IP (always the case on cloud hosting).
+_MESAS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static_mesas")
+_parties_cache = {}
+
+
+def _load_parties(proceso):
+    if proceso not in _parties_cache:
+        with open(os.path.join(_MESAS_DIR, proceso, "parties.json"), encoding="utf-8") as f:
+            _parties_cache[proceso] = json.load(f)
+    return _parties_cache[proceso]
+
+
+def mesa_from_static(codigo, proceso):
+    """Rebuild the ONPE API response shape from the bundled shards."""
+    import gzip
+    shard = os.path.join(_MESAS_DIR, proceso, f"{codigo[:3]}.json.gz")
+    if not os.path.exists(shard):
+        return None
+    with gzip.open(shard, "rt", encoding="utf-8") as f:
+        mesas = json.load(f)["mesas"]
+    m = mesas.get(codigo)
+    if not m:
+        return None
+    parties = _load_parties(proceso)
+    vv, ve = m["vv"] or 0, m["ve"] or 0
+    out = []
+    for eid_str in sorted(m["v"], key=int):
+        detalle = [{
+            "adCodigo": p["c"],
+            "adDescripcion": p["n"],
+            "adGrafico": p["g"],
+            "adVotos": v,
+            "adPorcentajeVotosValidos": round(v / vv * 100, 3) if vv and p["g"] else 0,
+            "adPorcentajeVotosEmitidos": round(v / ve * 100, 3) if ve else 0,
+        } for p, v in zip(parties[eid_str], m["v"][eid_str])]
+        out.append({
+            "codigoMesa": codigo,
+            "idEleccion": int(eid_str),
+            "nombreLocalVotacion": m["l"],
+            "centroPoblado": m["cp"],
+            "totalElectoresHabiles": m["eh"],
+            "totalVotosEmitidos": m["ve"],
+            "totalVotosValidos": m["vv"],
+            "porcentajeParticipacionCiudadana": m["pp"],
+            "descripcionEstadoActa": m["ea"],
+            "codigoEstadoActa": m["ce"],
+            "detalle": detalle,
+        })
+    return out
+
+
 def _get_proceso():
     p = request.args.get("proceso", DEFAULT_PROCESO)
     return p if p in PROCESOS else DEFAULT_PROCESO
@@ -74,15 +126,20 @@ def get_mesa():
         data = onpe_get("actas/buscar/mesa", {"codigoMesa": codigo}, proceso=proceso)
         if not data.get("success") or not data.get("data"):
             return jsonify({"error": "Mesa no encontrada o sin resultados"}), 404
-        for mesa in data["data"]:
-            eid = mesa.get("idEleccion")
-            nombre = ELECTION_NAMES.get(eid, f"Elección {eid}")
-            if proceso == "SEP2026" and eid == 10:
-                nombre = "Presidencial — 2da Vuelta"
-            mesa["nombreEleccion"] = nombre
-        return jsonify(data)
+        elections = data["data"]
+        fuente = "onpe"
     except Exception as e:
-        return jsonify({"error": f"Error al consultar ONPE: {e}"}), 500
+        elections = mesa_from_static(codigo, proceso)
+        if elections is None:
+            return jsonify({"error": f"Mesa no encontrada (ONPE inaccesible: {e})"}), 404
+        fuente = "local"
+    for mesa in elections:
+        eid = mesa.get("idEleccion")
+        nombre = ELECTION_NAMES.get(eid, f"Elección {eid}")
+        if proceso == "SEP2026" and eid == 10:
+            nombre = "Presidencial — 2da Vuelta"
+        mesa["nombreEleccion"] = nombre
+    return jsonify({"success": True, "fuente": fuente, "data": elections})
 
 
 # ── Scraper control ──────────────────────────────────────────────────────────
