@@ -108,6 +108,20 @@
     border-color: var(--onpe-blue);
   }
 
+  select {
+    height: 44px;
+    border: 1.5px solid var(--border);
+    border-radius: 8px;
+    padding: 0 12px;
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--onpe-blue);
+    background: var(--card);
+    cursor: pointer;
+  }
+
+  select:focus { outline: none; border-color: var(--onpe-blue); }
+
   button {
     height: 44px;
     padding: 0 28px;
@@ -335,7 +349,7 @@
   <div class="header-logo">ONPE<span>.</span></div>
   <div class="header-title">
     <h1>Resultados Electorales por Mesa</h1>
-    <p>Elecciones Generales 2026 — Consulta de Actas</p>
+    <p>Elecciones Generales 2026 — Resultados Oficiales (1ª y 2ª Vuelta)</p>
   </div>
   <nav style="display:flex;gap:8px;margin-left:auto">
     <a href="/" style="padding:7px 16px;border-radius:8px;font-size:13px;font-weight:600;text-decoration:none;color:#fff;border:1.5px solid rgba(255,255,255,.5);background:rgba(255,255,255,.15)">Buscar Mesa</a>
@@ -347,6 +361,13 @@
   <div class="search-card">
     <h2>Buscar Mesa de Votación</h2>
     <div class="search-row">
+      <div class="field">
+        <label for="procesoSelect">Proceso Electoral</label>
+        <select id="procesoSelect">
+          <option value="EG2026">1ª Vuelta — 12 abr 2026</option>
+          <option value="SEP2026">2ª Vuelta — 7 jun 2026</option>
+        </select>
+      </div>
       <div class="field">
         <label for="mesaInput">Código de Mesa (6 dígitos)</label>
         <input type="text" id="mesaInput" maxlength="6" placeholder="000000"
@@ -365,7 +386,7 @@
   </div>
 </main>
 
-<footer>Datos obtenidos en tiempo real desde ONPE — Oficina Nacional de Procesos Electorales</footer>
+<footer>Resultados oficiales desde los portales históricos de la ONPE — Oficina Nacional de Procesos Electorales</footer>
 
 <script>
 let currentData = null;
@@ -393,7 +414,8 @@ async function buscarMesa() {
   hideError();
 
   try {
-    const res = await fetch(`/api/mesa?codigoMesa=${encodeURIComponent(codigo)}`);
+    const proceso = document.getElementById('procesoSelect').value;
+    const res = await fetch(`/api/mesa?codigoMesa=${encodeURIComponent(codigo)}&proceso=${encodeURIComponent(proceso)}`);
     const json = await res.json();
     if (!res.ok || json.error) { showError(json.error || 'No se encontraron resultados.'); return; }
     currentData = json.data;

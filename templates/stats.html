@@ -137,8 +137,13 @@
   <div class="logo">ONPE<span>.</span></div>
   <div style="flex:1">
     <div style="font-size:17px;font-weight:600">Estadísticas Globales — EG 2026</div>
-    <div style="font-size:12px;opacity:.7;margin-top:2px">Resultados agregados de todas las mesas</div>
+    <div style="font-size:12px;opacity:.7;margin-top:2px">Resultados oficiales agregados de todas las mesas</div>
   </div>
+  <select id="procesoSelect" onchange="onProcesoChange()"
+          style="height:36px;border:1.5px solid rgba(255,255,255,.4);border-radius:8px;padding:0 10px;font-size:13px;font-weight:600;background:rgba(255,255,255,.12);color:#fff;cursor:pointer">
+    <option value="EG2026" style="color:#1a1b1f">1ª Vuelta — 12 abr</option>
+    <option value="SEP2026" style="color:#1a1b1f">2ª Vuelta — 7 jun</option>
+  </select>
   <nav class="header-nav">
     <a href="/" class="nav-link">Buscar Mesa</a>
     <a href="/stats" class="nav-link active">Estadísticas</a>
@@ -231,8 +236,27 @@ let lastFoundCount = -1;
 const fmt = n => (n||0).toLocaleString('es-PE');
 const pct  = n => (n||0).toFixed(1) + '%';
 
+const P = () => document.getElementById('procesoSelect').value;
+
+const ELECCIONES = {
+  EG2026: { '10':'Presidencial','15':'Senadores 33','14':'Senadores DEM','13':'Senadores DEU','12':'Parlamento Andino' },
+  SEP2026: { '10':'Presidencial — 2da Vuelta' },
+};
+
+function rebuildEleccionSelect() {
+  const sel = document.getElementById('eleccionSelect');
+  const opts = ELECCIONES[P()];
+  sel.innerHTML = Object.entries(opts).map(([v,n]) => `<option value="${v}">${n}</option>`).join('');
+}
+
+async function onProcesoChange() {
+  rebuildEleccionSelect();
+  await loadOverview();
+  await Promise.all([loadParties(), loadParticipation(), loadActaStatus()]);
+}
+
 async function loadOverview() {
-  const r = await fetch('/api/stats/overview');
+  const r = await fetch(`/api/stats/overview?proceso=${P()}`);
   const d = await r.json();
 
   document.getElementById('kMesas').textContent          = fmt(d.total_mesas);
@@ -259,7 +283,7 @@ function updateScraperUI(s) {
   document.getElementById('progressFill').style.width = p.toFixed(1) + '%';
   document.getElementById('scraperPct').textContent   = p.toFixed(1) + '%';
   document.getElementById('scraperInfo').textContent  =
-    `Escaneadas: ${fmt(done)} | Encontradas: ${fmt(s.total_found)} | Código actual: ${String(s.current_code||0).padStart(6,'0')}`;
+    `Proceso: ${s.proceso || '—'} | Escaneadas: ${fmt(done)} | Encontradas: ${fmt(s.total_found)} | Código actual: ${String(s.current_code||0).padStart(6,'0')}`;
 
   document.getElementById('btnStart').disabled = s.running;
   document.getElementById('btnStop').disabled  = !s.running;
@@ -267,7 +291,7 @@ function updateScraperUI(s) {
 
 async function loadParties() {
   const eid = document.getElementById('eleccionSelect').value;
-  const r = await fetch(`/api/stats/parties?eleccion=${eid}&limit=30`);
+  const r = await fetch(`/api/stats/parties?eleccion=${eid}&limit=30&proceso=${P()}`);
   partiesData = await r.json();
 
   const labels = partiesData.map(p => p.partido?.length > 35 ? p.partido.slice(0,33)+'…' : p.partido);
@@ -298,7 +322,7 @@ async function loadParties() {
   });
 
   // Update table
-  const names = { '10':'Presidencial','15':'Senadores 33','14':'Senadores DEM','13':'Senadores DEU','12':'Parlamento Andino' };
+  const names = ELECCIONES[P()];
   document.getElementById('tableTitle').textContent = `Ranking de Partidos — ${names[eid] || eid}`;
   const tbody = document.getElementById('partiesTable');
   if (!partiesData.length) { tbody.innerHTML = '<tr><td colspan="5" class="loading">Sin datos</td></tr>'; return; }
@@ -318,7 +342,7 @@ async function loadParties() {
 }
 
 async function loadParticipation() {
-  const r = await fetch('/api/stats/participation');
+  const r = await fetch(`/api/stats/participation?proceso=${P()}`);
   const d = await r.json();
   if (!d.length) return;
 
@@ -339,7 +363,7 @@ async function loadParticipation() {
 }
 
 async function loadActaStatus() {
-  const r = await fetch('/api/stats/acta_status');
+  const r = await fetch(`/api/stats/acta_status?proceso=${P()}`);
   const d = await r.json();
   if (!d.length) return;
 
@@ -366,7 +390,8 @@ async function startScraper() {
   const start   = parseInt(document.getElementById('scraperStart').value);
   const end     = parseInt(document.getElementById('scraperEnd').value);
   const workers = parseInt(document.getElementById('scraperWorkers').value);
-  await fetch('/api/scraper/start', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({start,end,workers}) });
+  const proceso = P();
+  await fetch('/api/scraper/start', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({start,end,workers,proceso}) });
   pollScraper();
 }
 
@@ -401,6 +426,7 @@ function esc(s) {
 }
 
 async function init() {
+  rebuildEleccionSelect();
   await loadOverview();
   await Promise.all([loadParties(), loadParticipation(), loadActaStatus()]);
   lastFoundCount = -1; // reset so first poll always loads charts once

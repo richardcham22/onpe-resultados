@@ -1,6 +1,5 @@
 import os
 from flask import Flask, render_template, jsonify, request
-import requests as req
 
 from db import (
     init_db, get_session, ELECTION_NAMES,
@@ -8,34 +7,23 @@ from db import (
     stats_participation_buckets, stats_acta_status, stats_elecciones,
 )
 import scraper
+from scraper import PROCESOS, DEFAULT_PROCESO, get_http
 
 app = Flask(__name__)
 
-ONPE_BASE = "https://resultadoelectoral.onpe.gob.pe"
-ONPE_API  = f"{ONPE_BASE}/presentacion-backend"
 
-_BROWSER_HEADERS = {
-    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
-    "Accept": "application/json, text/plain, */*",
-    "Sec-Fetch-Site": "same-origin",
-    "Sec-Fetch-Mode": "cors",
-    "Sec-Fetch-Dest": "empty",
-    "Referer": f"{ONPE_BASE}/",
-}
-_http = req.Session()
-_session_ready = False
+def _get_proceso():
+    p = request.args.get("proceso", DEFAULT_PROCESO)
+    return p if p in PROCESOS else DEFAULT_PROCESO
 
 
-def _ensure_session():
-    global _session_ready
-    if not _session_ready:
-        _http.get(ONPE_BASE, headers={"User-Agent": _BROWSER_HEADERS["User-Agent"]}, timeout=10)
-        _session_ready = True
-
-
-def onpe_get(path, params=None):
-    _ensure_session()
-    resp = _http.get(f"{ONPE_API}/{path}", params=params, headers=_BROWSER_HEADERS, timeout=15)
+def onpe_get(path, params=None, proceso=DEFAULT_PROCESO):
+    base = PROCESOS[proceso]
+    resp = get_http().get(
+        f"{base}/presentacion-backend/{path}", params=params,
+        headers={"Accept": "application/json, text/plain, */*", "Referer": f"{base}/"},
+        timeout=15,
+    )
     text = resp.text.strip()
     if not text or not text.startswith("{"):
         raise ValueError("Respuesta vacía del servidor ONPE")
@@ -59,19 +47,21 @@ def stats_page():
 @app.route("/api/mesa")
 def get_mesa():
     codigo = request.args.get("codigoMesa", "").strip().zfill(6)
+    proceso = _get_proceso()
     if not codigo or not codigo.isdigit():
         return jsonify({"error": "Código de mesa inválido"}), 400
     try:
-        data = onpe_get("actas/buscar/mesa", {"codigoMesa": codigo})
+        data = onpe_get("actas/buscar/mesa", {"codigoMesa": codigo}, proceso=proceso)
         if not data.get("success") or not data.get("data"):
             return jsonify({"error": "Mesa no encontrada o sin resultados"}), 404
         for mesa in data["data"]:
             eid = mesa.get("idEleccion")
-            mesa["nombreEleccion"] = ELECTION_NAMES.get(eid, f"Elección {eid}")
+            nombre = ELECTION_NAMES.get(eid, f"Elección {eid}")
+            if proceso == "SEP2026" and eid == 10:
+                nombre = "Presidencial — 2da Vuelta"
+            mesa["nombreEleccion"] = nombre
         return jsonify(data)
     except Exception as e:
-        global _session_ready
-        _session_ready = False
         return jsonify({"error": f"Error al consultar ONPE: {e}"}), 500
 
 
@@ -85,8 +75,11 @@ def scraper_start():
     start = int(body.get("start", 1))
     end   = int(body.get("end",   89999))
     workers = int(body.get("workers", 20))
-    scraper.start(start=start, end=end, workers=workers)
-    return jsonify({"ok": True, "start": start, "end": end, "workers": workers})
+    proceso = body.get("proceso", DEFAULT_PROCESO)
+    if proceso not in PROCESOS:
+        return jsonify({"error": f"Proceso inválido: {proceso}"}), 400
+    scraper.start(start=start, end=end, workers=workers, proceso=proceso)
+    return jsonify({"ok": True, "start": start, "end": end, "workers": workers, "proceso": proceso})
 
 
 @app.route("/api/scraper/stop", methods=["POST"])
@@ -120,7 +113,7 @@ def scraper_status():
 @app.route("/api/stats/overview")
 def api_overview():
     try:
-        return jsonify(stats_overview())
+        return jsonify(stats_overview(_get_proceso()))
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
@@ -130,7 +123,7 @@ def api_parties():
     try:
         eid   = int(request.args.get("eleccion", 10))
         limit = int(request.args.get("limit", 30))
-        return jsonify(stats_parties(eid, limit))
+        return jsonify(stats_parties(eid, limit, _get_proceso()))
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
@@ -138,7 +131,7 @@ def api_parties():
 @app.route("/api/stats/participation")
 def api_participation():
     try:
-        return jsonify(stats_participation_buckets())
+        return jsonify(stats_participation_buckets(_get_proceso()))
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
@@ -146,7 +139,7 @@ def api_participation():
 @app.route("/api/stats/acta_status")
 def api_acta_status():
     try:
-        return jsonify(stats_acta_status())
+        return jsonify(stats_acta_status(_get_proceso()))
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
@@ -154,7 +147,7 @@ def api_acta_status():
 @app.route("/api/stats/elecciones")
 def api_elecciones():
     try:
-        return jsonify(stats_elecciones())
+        return jsonify(stats_elecciones(_get_proceso()))
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 

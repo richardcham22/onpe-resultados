@@ -1,72 +1,79 @@
 import threading
 import time
-import requests as req
 from datetime import datetime
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from sqlalchemy import insert as sa_insert
 from sqlalchemy.orm import Session
-from sqlalchemy.dialects.sqlite import insert as sqlite_insert
+from curl_cffi import requests as req
 
 from db import engine, Mesa, Resultado, ScraperState, ELECTION_NAMES
 
-ONPE_BASE = "https://resultadoelectoral.onpe.gob.pe"
-ONPE_API  = f"{ONPE_BASE}/presentacion-backend"
+# Official ONPE historical results portals (post-election, final data).
+# The live-count site (resultadoelectoral.onpe.gob.pe) was taken down after
+# the elections; these portals expose the same presentacion-backend API.
+# They sit behind Cloudflare TLS fingerprinting, hence curl_cffi with
+# Chrome impersonation instead of plain requests.
+PROCESOS = {
+    "EG2026":  "https://resultadohistorico-eg2026.onpe.gob.pe",   # Primera vuelta (12 abr 2026)
+    "SEP2026": "https://resultadohistorico-sep2026.onpe.gob.pe",  # Segunda vuelta (7 jun 2026)
+}
+DEFAULT_PROCESO = "EG2026"
 
 _stop_event = threading.Event()
 _scraper_thread = None
-_session_lock = threading.Lock()
-_http = req.Session()
-_session_ready = False
+_tls = threading.local()
 
 
-def _ensure_session():
-    global _session_ready
-    with _session_lock:
-        if not _session_ready:
-            _http.get(ONPE_BASE, headers={"User-Agent": _UA}, timeout=10)
-            _session_ready = True
+def get_http():
+    """Thread-local Chrome-impersonating session."""
+    if not hasattr(_tls, "session"):
+        _tls.session = req.Session(impersonate="chrome")
+    return _tls.session
 
 
-_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
-_HEADERS = {
-    "User-Agent": _UA,
-    "Accept": "application/json, text/plain, */*",
-    "Sec-Fetch-Site": "same-origin",
-    "Sec-Fetch-Mode": "cors",
-    "Sec-Fetch-Dest": "empty",
-    "Referer": f"{ONPE_BASE}/",
-}
+def _headers(base):
+    return {
+        "Accept": "application/json, text/plain, */*",
+        "Referer": f"{base}/",
+    }
 
 
-def fetch_mesa(codigo: str):
-    """Returns list of election dicts for this mesa, or None if not found."""
-    global _session_ready
-    try:
-        _ensure_session()
-        resp = _http.get(
-            f"{ONPE_API}/actas/buscar/mesa",
-            params={"codigoMesa": codigo},
-            headers=_HEADERS,
-            timeout=12,
-        )
-        text = resp.text.strip()
-        if not text or not text.startswith("{"):
-            return None
-        data = resp.json()
-        return data.get("data") or None
-    except Exception:
-        with _session_lock:
-            _session_ready = False
-        return None
+def fetch_mesa(codigo: str, proceso: str = DEFAULT_PROCESO):
+    """Returns list of election dicts for this mesa, or None if not found.
+
+    A nonexistent mesa returns HTTP 204 (definitive). Anything else that
+    isn't valid JSON is treated as transient (WAF challenge, timeout) and
+    retried, so blocks don't silently register mesas as missing.
+    """
+    base = PROCESOS[proceso]
+    for attempt in range(3):
+        try:
+            resp = get_http().get(
+                f"{base}/presentacion-backend/actas/buscar/mesa",
+                params={"codigoMesa": codigo},
+                headers=_headers(base),
+                timeout=12,
+            )
+            if resp.status_code == 204:
+                return None
+            if resp.status_code == 200:
+                text = resp.text.strip()
+                if text.startswith("{"):
+                    return resp.json().get("data") or None
+        except Exception:
+            pass
+        time.sleep(1 + attempt * 2)
+    return None
 
 
-def _save_mesa(db: Session, elections: list):
+def _save_mesa(db: Session, elections: list, proceso: str):
     """Upsert mesa + resultados rows from API response."""
     first = elections[0]
     codigo = first["codigoMesa"]
 
-    mesa = db.query(Mesa).filter_by(codigo_mesa=codigo).first()
+    mesa = db.query(Mesa).filter_by(codigo_mesa=codigo, proceso=proceso).first()
     if not mesa:
-        mesa = Mesa(codigo_mesa=codigo)
+        mesa = Mesa(codigo_mesa=codigo, proceso=proceso)
         db.add(mesa)
 
     mesa.nombre_local        = first.get("nombreLocalVotacion")
@@ -81,23 +88,31 @@ def _save_mesa(db: Session, elections: list):
     mesa.scraped_at          = datetime.utcnow()
 
     # Delete old resultados for this mesa (clean upsert)
-    db.query(Resultado).filter_by(codigo_mesa=codigo).delete()
+    db.query(Resultado).filter_by(codigo_mesa=codigo, proceso=proceso).delete()
 
+    rows = []
     for election in elections:
         eid   = election.get("idEleccion")
         ename = ELECTION_NAMES.get(eid, f"Elección {eid}")
         for p in election.get("detalle", []):
-            db.add(Resultado(
+            # In SEP2026 ONPE marks VOTOS IMPUGNADOS with adGrafico=1;
+            # exclude all "VOTOS ..." rows from party rankings regardless.
+            descripcion = (p.get("adDescripcion") or "").strip()
+            es_partido = bool(p.get("adGrafico") == 1) and not descripcion.upper().startswith("VOTOS")
+            rows.append(dict(
+                proceso        = proceso,
                 codigo_mesa    = codigo,
                 id_eleccion    = eid,
                 nombre_eleccion= ename,
                 codigo_partido = p.get("adCodigo"),
-                nombre_partido = p.get("adDescripcion"),
+                nombre_partido = descripcion,
                 votos          = p.get("adVotos") or 0,
                 pct_validos    = p.get("adPorcentajeVotosValidos") or 0,
                 pct_emitidos   = p.get("adPorcentajeVotosEmitidos") or 0,
-                es_partido     = bool(p.get("adGrafico") == 1),
+                es_partido     = es_partido,
             ))
+    if rows:
+        db.execute(sa_insert(Resultado), rows)
     db.commit()
 
 
@@ -109,13 +124,10 @@ def _update_state(db: Session, **kwargs):
     db.commit()
 
 
-def _run_scraper(start: int, end: int, workers: int):
-    global _session_ready
-    _session_ready = False
-    _ensure_session()
-
+def _run_scraper(start: int, end: int, workers: int, proceso: str):
     with Session(engine) as db:
-        _update_state(db, status="running", range_start=start, range_end=end,
+        _update_state(db, status="running", proceso=proceso,
+                      range_start=start, range_end=end,
                       started_at=datetime.utcnow(), total_scanned=0, total_found=0)
 
     batch_size = workers * 4
@@ -137,7 +149,7 @@ def _run_scraper(start: int, end: int, workers: int):
                 if not batch:
                     break
 
-                futures = {pool.submit(fetch_mesa, c): c for c in batch}
+                futures = {pool.submit(fetch_mesa, c, proceso): c for c in batch}
                 for future in as_completed(futures):
                     if _stop_event.is_set():
                         break
@@ -148,7 +160,7 @@ def _run_scraper(start: int, end: int, workers: int):
                         found += 1
                         try:
                             with Session(engine) as db:
-                                _save_mesa(db, result)
+                                _save_mesa(db, result, proceso)
                         except Exception:
                             pass
 
@@ -168,11 +180,13 @@ def _run_scraper(start: int, end: int, workers: int):
             _update_state(db, status=status, total_scanned=scanned, total_found=found)
 
 
-def start(start=1, end=89999, workers=20):
+def start(start=1, end=89999, workers=20, proceso=DEFAULT_PROCESO):
     global _scraper_thread
+    if proceso not in PROCESOS:
+        raise ValueError(f"Proceso inválido: {proceso}")
     _stop_event.clear()
     _scraper_thread = threading.Thread(
-        target=_run_scraper, args=(start, end, workers), daemon=True
+        target=_run_scraper, args=(start, end, workers, proceso), daemon=True
     )
     _scraper_thread.start()
     return True
