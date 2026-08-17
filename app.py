@@ -114,6 +114,11 @@ def stats_page():
     return render_template("stats.html")
 
 
+@app.route("/distritos")
+def distritos_page():
+    return render_template("distritos.html")
+
+
 # ── Mesa lookup ──────────────────────────────────────────────────────────────
 
 @app.route("/api/mesa")

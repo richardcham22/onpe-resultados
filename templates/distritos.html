@@ -1,0 +1,270 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Resultados por Distrito — 2ª Vuelta 2026</title>
+<style>
+  :root {
+    --blue: #003770; --bg: #f4f6f9; --card: #fff;
+    --border: #dde3ed; --text: #1a1b1f; --muted: #6b7280;
+    --fp: #ea580c; --jpp: #16a34a;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: 'Segoe UI', system-ui, Arial, sans-serif; background: var(--bg); color: var(--text); }
+
+  header {
+    background: var(--blue); color: #fff; padding: 16px 24px;
+    display: flex; align-items: center; gap: 16px;
+    box-shadow: 0 2px 8px rgba(0,0,0,.25);
+  }
+  .logo { font-size: 28px; font-weight: 800; letter-spacing: -1px; }
+  .logo span { color: #f59e0b; }
+  .header-nav { display: flex; gap: 8px; margin-left: auto; }
+  .nav-link {
+    padding: 7px 16px; border-radius: 8px; font-size: 13px; font-weight: 600;
+    text-decoration: none; color: rgba(255,255,255,.8);
+    border: 1.5px solid rgba(255,255,255,.3); transition: all .2s;
+  }
+  .nav-link:hover, .nav-link.active { background: rgba(255,255,255,.15); color: #fff; }
+
+  main { max-width: 1200px; margin: 28px auto; padding: 0 16px; }
+
+  .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 14px; margin-bottom: 24px; }
+  .card {
+    background: var(--card); border-radius: 12px; padding: 16px 20px;
+    border: 1px solid var(--border); box-shadow: 0 1px 4px rgba(0,0,0,.06);
+  }
+  .card-value { font-size: 26px; font-weight: 800; line-height: 1; }
+  .card-label { font-size: 11px; color: var(--muted); margin-top: 6px; text-transform: uppercase; letter-spacing: .4px; }
+
+  .cols { display: grid; grid-template-columns: 5fr 7fr; gap: 20px; align-items: start; }
+  @media (max-width: 860px) { .cols { grid-template-columns: 1fr; } }
+
+  .panel {
+    background: var(--card); border-radius: 12px; overflow: hidden;
+    border: 1px solid var(--border); box-shadow: 0 1px 4px rgba(0,0,0,.06);
+  }
+  .panel-head { padding: 14px 16px 10px; border-bottom: 1px solid var(--border); }
+  .panel-title { font-size: 13px; font-weight: 700; color: var(--blue); text-transform: uppercase; letter-spacing: .4px; margin-bottom: 10px; }
+  .search {
+    width: 100%; height: 40px; border: 1.5px solid var(--border); border-radius: 8px;
+    padding: 0 12px; font-size: 14px; transition: border-color .2s;
+  }
+  .search:focus { outline: none; border-color: var(--blue); }
+
+  .list { max-height: 68vh; overflow-y: auto; }
+  .row {
+    display: flex; align-items: center; gap: 10px;
+    padding: 10px 14px; border-bottom: 1px solid #f1f5f9; cursor: pointer;
+    transition: background .12s;
+  }
+  .row:hover { background: #f8fafc; }
+  .row.selected { background: #eff6ff; border-left: 3px solid var(--blue); padding-left: 11px; }
+  .row-main { flex: 1; min-width: 0; }
+  .row-name { font-size: 14px; font-weight: 600; }
+  .row-sub  { font-size: 11.5px; color: var(--muted); margin-top: 1px; }
+  .chip {
+    flex-shrink: 0; padding: 3px 10px; border-radius: 12px;
+    font-size: 11px; font-weight: 700; color: #fff;
+  }
+  .chip.fp  { background: var(--fp); }
+  .chip.jpp { background: var(--jpp); }
+  .chip.tie { background: #94a3b8; }
+  .margin { flex-shrink: 0; text-align: right; font-variant-numeric: tabular-nums; }
+  .margin-votes { font-size: 13px; font-weight: 700; }
+  .margin-pct   { font-size: 11px; color: var(--muted); }
+
+  /* district vote bar */
+  .vote-bar { display: flex; height: 6px; border-radius: 3px; overflow: hidden; margin-top: 6px; background: #e2e8f0; }
+  .vote-bar .fp  { background: var(--fp); }
+  .vote-bar .jpp { background: var(--jpp); }
+  .votes-line { display: flex; justify-content: space-between; font-size: 11.5px; margin-top: 4px; font-variant-numeric: tabular-nums; }
+  .votes-line .vfp  { color: var(--fp); font-weight: 600; }
+  .votes-line .vjpp { color: var(--jpp); font-weight: 600; }
+
+  .empty { padding: 40px; text-align: center; color: var(--muted); font-size: 13px; }
+
+  .legend { display: flex; gap: 16px; margin-bottom: 16px; font-size: 12.5px; color: var(--muted); flex-wrap: wrap; }
+  .legend .dot { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 5px; vertical-align: -1px; }
+
+  footer { text-align: center; padding: 20px; font-size: 12px; color: var(--muted); }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="logo">ONPE<span>.</span></div>
+  <div style="flex:1">
+    <div style="font-size:17px;font-weight:600">Resultados por Distrito — Segunda Vuelta 2026</div>
+    <div style="font-size:12px;opacity:.7;margin-top:2px">Fujimori (Fuerza Popular) vs Sánchez (Juntos por el Perú) — 7 jun 2026</div>
+  </div>
+  <nav class="header-nav">
+    <a href="/" class="nav-link">Buscar Mesa</a>
+    <a href="/distritos" class="nav-link active">Distritos</a>
+    <a href="/stats" class="nav-link">Estadísticas</a>
+  </nav>
+</header>
+
+<main>
+  <div class="cards">
+    <div class="card"><div class="card-value" style="color:var(--fp)" id="kFp">—</div><div class="card-label">Distritos ganados — Fuerza Popular</div></div>
+    <div class="card"><div class="card-value" style="color:var(--jpp)" id="kJpp">—</div><div class="card-label">Distritos ganados — Juntos por el Perú</div></div>
+    <div class="card"><div class="card-value" style="color:#94a3b8" id="kTie">—</div><div class="card-label">Empates</div></div>
+    <div class="card"><div class="card-value" style="color:var(--blue)" id="kProv">—</div><div class="card-label">Provincias / Países</div></div>
+  </div>
+
+  <div class="legend">
+    <span><span class="dot" style="background:var(--fp)"></span>Fuerza Popular (Keiko Fujimori)</span>
+    <span><span class="dot" style="background:var(--jpp)"></span>Juntos por el Perú (Roberto Sánchez)</span>
+    <span>El voto en el extranjero aparece como CONTINENTE / PAÍS / CIUDAD.</span>
+  </div>
+
+  <div class="cols">
+    <div class="panel">
+      <div class="panel-head">
+        <div class="panel-title">Provincias</div>
+        <input class="search" id="provSearch" placeholder="Buscar provincia o departamento…" autocomplete="off">
+      </div>
+      <div class="list" id="provList"></div>
+    </div>
+
+    <div class="panel">
+      <div class="panel-head">
+        <div class="panel-title" id="distTitle">Distritos</div>
+        <input class="search" id="distSearch" placeholder="Buscar distrito…" autocomplete="off" disabled>
+      </div>
+      <div class="list" id="distList"><div class="empty">Seleccione una provincia para ver sus distritos</div></div>
+    </div>
+  </div>
+</main>
+
+<footer>Resultados oficiales finales de la ONPE — Segunda Elección Presidencial 2026</footer>
+
+<script>
+let DATA = null;
+let provinces = [];      // [{key, dep, prov, fp, jpp, distritos: [...]}]
+let selectedProv = null;
+
+const fmt = n => (n||0).toLocaleString('es-PE');
+const esc = s => String(s??'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+const norm = s => s.normalize('NFD').replace(/[̀-ͯ]/g,'').toLowerCase();
+
+function winner(fp, jpp) {
+  if (fp > jpp) return {cls:'fp', label:'FP'};
+  if (jpp > fp) return {cls:'jpp', label:'JPP'};
+  return {cls:'tie', label:'EMPATE'};
+}
+
+async function init() {
+  const r = await fetch('/static/distritos_sep2026.json');
+  DATA = await r.json();
+
+  const byProv = new Map();
+  for (const d of DATA.distritos) {
+    const key = `${d.dep} / ${d.prov}`;
+    if (!byProv.has(key)) byProv.set(key, {key, dep: d.dep, prov: d.prov, fp: 0, jpp: 0, distritos: []});
+    const p = byProv.get(key);
+    p.fp += d.fp; p.jpp += d.jpp;
+    p.distritos.push(d);
+  }
+  provinces = [...byProv.values()].sort((a,b) => a.key.localeCompare(b.key, 'es'));
+
+  let fpW = 0, jppW = 0, tie = 0;
+  for (const d of DATA.distritos) {
+    if (d.fp > d.jpp) fpW++; else if (d.jpp > d.fp) jppW++; else tie++;
+  }
+  document.getElementById('kFp').textContent   = fmt(fpW);
+  document.getElementById('kJpp').textContent  = fmt(jppW);
+  document.getElementById('kTie').textContent  = fmt(tie);
+  document.getElementById('kProv').textContent = fmt(provinces.length);
+
+  renderProvinces();
+}
+
+function renderProvinces() {
+  const q = norm(document.getElementById('provSearch').value.trim());
+  const list = document.getElementById('provList');
+  const shown = provinces.filter(p => !q || norm(p.key).includes(q));
+  if (!shown.length) { list.innerHTML = '<div class="empty">Sin coincidencias</div>'; return; }
+
+  list.innerHTML = shown.map(p => {
+    const w = winner(p.fp, p.jpp);
+    const margin = Math.abs(p.fp - p.jpp);
+    const total = p.fp + p.jpp || 1;
+    const wonFp  = p.distritos.filter(d => d.fp > d.jpp).length;
+    const wonJpp = p.distritos.filter(d => d.jpp > d.fp).length;
+    return `
+    <div class="row ${selectedProv === p.key ? 'selected' : ''}" onclick="selectProv('${esc(p.key).replace(/'/g,"\\'")}')">
+      <div class="row-main">
+        <div class="row-name">${esc(p.prov)}</div>
+        <div class="row-sub">${esc(p.dep)} · ${p.distritos.length} distrito${p.distritos.length===1?'':'s'} (FP ${wonFp} · JPP ${wonJpp})</div>
+      </div>
+      <div class="margin">
+        <div class="margin-votes">+${fmt(margin)}</div>
+        <div class="margin-pct">${(margin/total*100).toFixed(1)} pts</div>
+      </div>
+      <span class="chip ${w.cls}">${w.label}</span>
+    </div>`;
+  }).join('');
+}
+
+function selectProv(key) {
+  selectedProv = key;
+  const search = document.getElementById('distSearch');
+  search.disabled = false;
+  search.value = '';
+  renderProvinces();
+  renderDistritos();
+  if (window.innerWidth <= 860) {
+    document.getElementById('distTitle').scrollIntoView({behavior:'smooth'});
+  }
+}
+
+function renderDistritos() {
+  const p = provinces.find(x => x.key === selectedProv);
+  const list = document.getElementById('distList');
+  const title = document.getElementById('distTitle');
+  if (!p) { title.textContent = 'Distritos'; list.innerHTML = '<div class="empty">Seleccione una provincia</div>'; return; }
+
+  title.textContent = `Distritos — ${p.prov} (${p.dep})`;
+  const q = norm(document.getElementById('distSearch').value.trim());
+  const shown = p.distritos
+    .filter(d => !q || norm(d.dist).includes(q))
+    .slice()
+    .sort((a,b) => a.dist.localeCompare(b.dist, 'es'));
+  if (!shown.length) { list.innerHTML = '<div class="empty">Sin coincidencias</div>'; return; }
+
+  list.innerHTML = shown.map(d => {
+    const w = winner(d.fp, d.jpp);
+    const total = d.fp + d.jpp || 1;
+    const margin = Math.abs(d.fp - d.jpp);
+    const pfp = d.fp / total * 100;
+    return `
+    <div class="row" style="cursor:default">
+      <div class="row-main">
+        <div style="display:flex;align-items:center;gap:8px">
+          <span class="row-name">${esc(d.dist)}</span>
+          <span class="chip ${w.cls}">${w.label}</span>
+        </div>
+        <div class="vote-bar"><div class="fp" style="width:${pfp.toFixed(2)}%"></div><div class="jpp" style="width:${(100-pfp).toFixed(2)}%"></div></div>
+        <div class="votes-line">
+          <span class="vfp">FP ${fmt(d.fp)} (${pfp.toFixed(2)}%)</span>
+          <span class="vjpp">JPP ${fmt(d.jpp)} (${(100-pfp).toFixed(2)}%)</span>
+        </div>
+        <div class="row-sub" style="margin-top:3px">${d.mesas} mesas · ${fmt(d.emitidos)} votos emitidos</div>
+      </div>
+      <div class="margin">
+        <div class="margin-votes">+${fmt(margin)}</div>
+        <div class="margin-pct">${(margin/total*100).toFixed(2)} pts</div>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+document.getElementById('provSearch').addEventListener('input', renderProvinces);
+document.getElementById('distSearch').addEventListener('input', renderDistritos);
+init();
+</script>
+</body>
+</html>
