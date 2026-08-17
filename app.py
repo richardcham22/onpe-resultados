@@ -1,3 +1,4 @@
+import json
 import os
 from flask import Flask, render_template, jsonify, request
 
@@ -11,6 +12,19 @@ from scraper import PROCESOS, DEFAULT_PROCESO, get_http
 
 app = Flask(__name__)
 
+# Final official results precomputed by generate_static.py. When present,
+# stats are served from this file and no database is needed (the results
+# never change); the scraper endpoints are disabled.
+STATIC_DATA = None
+_static_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static_data.json")
+if os.path.exists(_static_path):
+    with open(_static_path, encoding="utf-8") as f:
+        STATIC_DATA = json.load(f)
+
+
+def _sd(proceso):
+    return STATIC_DATA["procesos"].get(proceso, {})
+
 
 def _get_proceso():
     p = request.args.get("proceso", DEFAULT_PROCESO)
@@ -19,15 +33,21 @@ def _get_proceso():
 
 def onpe_get(path, params=None, proceso=DEFAULT_PROCESO):
     base = PROCESOS[proceso]
-    resp = get_http().get(
-        f"{base}/presentacion-backend/{path}", params=params,
-        headers={"Accept": "application/json, text/plain, */*", "Referer": f"{base}/"},
-        timeout=15,
-    )
-    text = resp.text.strip()
-    if not text or not text.startswith("{"):
-        raise ValueError("Respuesta vacía del servidor ONPE")
-    return resp.json()
+    last_err = None
+    for _ in range(2):
+        try:
+            resp = get_http().get(
+                f"{base}/presentacion-backend/{path}", params=params,
+                headers={"Accept": "application/json, text/plain, */*", "Referer": f"{base}/"},
+                timeout=15,
+            )
+            text = resp.text.strip()
+            if text.startswith("{"):
+                return resp.json()
+            last_err = ValueError("Respuesta vacía del servidor ONPE")
+        except Exception as e:
+            last_err = e
+    raise last_err
 
 
 # ── Pages ────────────────────────────────────────────────────────────────────
@@ -69,6 +89,8 @@ def get_mesa():
 
 @app.route("/api/scraper/start", methods=["POST"])
 def scraper_start():
+    if STATIC_DATA:
+        return jsonify({"error": "Scraper deshabilitado: resultados finales precargados"}), 410
     if scraper.is_running():
         return jsonify({"error": "El scraper ya está en ejecución"}), 409
     body = request.get_json(silent=True) or {}
@@ -90,6 +112,11 @@ def scraper_stop():
 
 @app.route("/api/scraper/status")
 def scraper_status():
+    if STATIC_DATA:
+        return jsonify({
+            "status": "static", "running": False, "proceso": None,
+            "current_code": 0, "range_end": 0, "total_scanned": 0, "total_found": 0,
+        })
     ov = stats_overview()
     running = scraper.is_running()
     state = ov["scraper"]
@@ -113,6 +140,11 @@ def scraper_status():
 @app.route("/api/stats/overview")
 def api_overview():
     try:
+        if STATIC_DATA:
+            ov = dict(_sd(_get_proceso()).get("overview", {}))
+            ov["scraper"] = {"status": "static", "proceso": None, "current_code": 0,
+                             "range_end": 0, "total_scanned": 0, "total_found": 0}
+            return jsonify(ov)
         return jsonify(stats_overview(_get_proceso()))
     except Exception as e:
         return jsonify({"error": str(e)}), 500
@@ -123,6 +155,8 @@ def api_parties():
     try:
         eid   = int(request.args.get("eleccion", 10))
         limit = int(request.args.get("limit", 30))
+        if STATIC_DATA:
+            return jsonify(_sd(_get_proceso()).get("parties", {}).get(str(eid), [])[:limit])
         return jsonify(stats_parties(eid, limit, _get_proceso()))
     except Exception as e:
         return jsonify({"error": str(e)}), 500
@@ -131,6 +165,8 @@ def api_parties():
 @app.route("/api/stats/participation")
 def api_participation():
     try:
+        if STATIC_DATA:
+            return jsonify(_sd(_get_proceso()).get("participation", []))
         return jsonify(stats_participation_buckets(_get_proceso()))
     except Exception as e:
         return jsonify({"error": str(e)}), 500
@@ -139,6 +175,8 @@ def api_participation():
 @app.route("/api/stats/acta_status")
 def api_acta_status():
     try:
+        if STATIC_DATA:
+            return jsonify(_sd(_get_proceso()).get("acta_status", []))
         return jsonify(stats_acta_status(_get_proceso()))
     except Exception as e:
         return jsonify({"error": str(e)}), 500
@@ -147,6 +185,8 @@ def api_acta_status():
 @app.route("/api/stats/elecciones")
 def api_elecciones():
     try:
+        if STATIC_DATA:
+            return jsonify(_sd(_get_proceso()).get("elecciones", []))
         return jsonify(stats_elecciones(_get_proceso()))
     except Exception as e:
         return jsonify({"error": str(e)}), 500
@@ -154,7 +194,8 @@ def api_elecciones():
 
 # ── Bootstrap ────────────────────────────────────────────────────────────────
 
-init_db()
+if STATIC_DATA is None:
+    init_db()
 
 if __name__ == "__main__":
     app.run(debug=True, port=5000)

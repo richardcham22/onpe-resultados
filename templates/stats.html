@@ -218,7 +218,7 @@
         <tr>
           <th>#</th><th>Organización Política</th>
           <th class="num">Votos Totales</th>
-          <th>% Promedio</th>
+          <th>% Votos Válidos</th>
           <th class="num">Mesas con Votos</th>
         </tr>
       </thead>
@@ -270,6 +270,11 @@ async function loadOverview() {
 }
 
 function updateScraperUI(s) {
+  if (s.status === 'static') {
+    // Final results are precomputed; there is nothing to scrape.
+    document.querySelector('.scraper-panel').style.display = 'none';
+    return;
+  }
   const pill = document.getElementById('scraperPill');
   // Use the actual thread liveness (s.running) for visual state, fall back to DB status
   const effectiveStatus = s.running ? 'running' : (s.status === 'running' ? 'stopped' : s.status);
